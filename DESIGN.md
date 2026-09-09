@@ -58,7 +58,7 @@ The system prompt must include:
 - Role: autonomous software engineer agent
 - Repo path and branch name (injected at runtime as f-string)
 - Mandatory workflow: investigate → implement → run tests → PR only if tests pass
-- Hard rule: **never call `create_pr` unless the immediately preceding `run_command` for tests returned `returncode: 0`**
+- Hard rule: **never call `create_pr` unless the immediately preceding `run_tests` for tests returned `returncode: 0`**
 - Hard rule: always call `git_commit` before `create_pr`
 - Encourage reading existing tests first to understand the test command
 
@@ -81,7 +81,24 @@ returncode: <n>
 stdout: <text>
 stderr: <text>
 ```
-Used for everything: tests (`pytest`), inspection (`find`, `cat`, `grep`), reading repo structure. No separate `list_files` tool needed.
+Used for repository inspection and non-test shell commands such as find, grep, git diff, etc. Tests must use run_tests.
+
+### `run_tests(cmd: str) → str`
+Runs the repository test command with a 60s timeout.
+
+Returns:
+
+returncode: <n>
+stdout: <text>
+stderr: <text>
+
+Updates state.tests_passed:
+
+- returncode == 0 → True
+- otherwise → False
+
+Any code modification after a successful test run resets
+state.tests_passed = False.
 
 ### `git_commit(message: str) → str`
 Runs `git add -A && git commit -m <message>` in repo root. Returns stdout/stderr or error string. Agent does not track which files changed — `git add -A` handles it.
@@ -93,7 +110,7 @@ Terminal action. Runs:
 
 Returns PR URL string on success, error string on failure. Sets `state.pr_opened = True` on success.
 
-**`TOOL_SCHEMAS`** — list of Claude input_schema dicts for the above 5 tools, defined in `tools.py` alongside implementations.
+**`TOOL_SCHEMAS`** — list of Claude input_schema dicts for the above 6 tools, defined in `tools.py` alongside implementations.
 
 ---
 
@@ -104,7 +121,8 @@ Returns PR URL string on success, error string on failure. Sets `state.pr_opened
 class AgentState:
     repo_path: str   # absolute path, used by all tools
     branch: str      # working branch name
-    pr_opened: bool  # True once create_pr succeeds
+    pr_opened: bool = False # True once create_pr succeeds
+    test_passed: bool = False
 ```
 
 `issue` and all tool results live in `messages` — no need to duplicate in state. No disk persistence.
@@ -147,14 +165,16 @@ Build and verify in this order — each step is independently testable:
 
 1. **`tools.py`** — implement and manually test each function:
    - `run_command` first (everything depends on it)
-   - `read_file`, `write_file`
+   - `read_file`, 
+   - `write_file`
+   - `run_tests`
    - `git_commit`
    - `create_pr`
-   - `TOOL_SCHEMAS` (5 Claude input_schema dicts)
+   - `TOOL_SCHEMAS` (6 Claude input_schema dicts)
 
 2. **`agent.py`** — implement `run_agent()`:
    - Hardcode a short system prompt first; refine after smoke test
-   - Wire dispatch: `if name == "run_command": ...` for each of the 5 tools
+   - Wire dispatch: `if name == "run_command": ...` for each of the 6 tools
    - Test with a trivial issue: "add a comment to main.py" against a scratch repo
 
 3. **`main.py`** — thin CLI wrapper last:
