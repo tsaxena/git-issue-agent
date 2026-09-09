@@ -78,7 +78,7 @@ def git_commit(message: str, state: AgentState) -> str:
 
 def create_pr(title: str, body: str, state: AgentState) -> str:
     if not state.tests_passed:
-        return "error: tests have not passed; call run_tests and confirm returncode 0 before creating a PR"
+        return "error: PR blocked because tests have not passed"
 
     rc, out, err = _run(
         f"git push -u origin {shlex.quote(state.branch)}",
