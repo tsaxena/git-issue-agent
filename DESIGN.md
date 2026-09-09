@@ -95,7 +95,8 @@ The system prompt must include:
 - Role: autonomous software engineer agent
 - Repo path and branch name (injected at runtime as f-string)
 - Mandatory workflow: investigate → implement → run tests → PR only if tests pass
-- Hard rule: **never call `create_pr` unless the immediately preceding `run_tests` for tests returned `returncode: 0`**
+- Hard rule: **After the final code modification, call `run_tests` before
+`git_commit` and `create_pr`.**
 - Hard rule: always call `git_commit` before `create_pr`
 - Encourage reading existing tests first to understand the test command
 
@@ -141,11 +142,17 @@ state.tests_passed = False.
 Runs `git add -A && git commit -m <message>` in repo root. Returns stdout/stderr or error string. Agent does not track which files changed — `git add -A` handles it.
 
 ### `create_pr(title: str, body: str) → str`
-Terminal action. Runs:
-1. `git push -u origin <branch>`
-2. `gh pr create --title <title> --body <body>`
+Before performing any Git or GitHub operation:
 
-Returns PR URL string on success, error string on failure. Sets `state.pr_opened = True` on success.
+if not state.tests_passed:
+    return "error: PR blocked because tests have not passed"
+
+Otherwise:
+
+1. git push -u origin <branch>
+2. gh pr create --title <title> --body <body>
+
+Returns the PR URL on success and sets state.pr_opened = True.
 
 **`TOOL_SCHEMAS`** — list of Claude input_schema dicts for the above 6 tools, defined in `tools.py` alongside implementations.
 
@@ -159,7 +166,7 @@ class AgentState:
     repo_path: str   # absolute path, used by all tools
     branch: str      # working branch name
     pr_opened: bool = False # True once create_pr succeeds
-    test_passed: bool = False
+    tests_passed: bool = False
 ```
 
 `issue` and all tool results live in `messages` — no need to duplicate in state. No disk persistence.
@@ -171,7 +178,8 @@ class AgentState:
 | Failure | Response |
 |---------|----------|
 | Tests fail | Agent sees `returncode: 1` + stdout/stderr; retries fix in next iterations |
-| Agent calls `create_pr` before tests pass | System prompt forbids it; if it does anyway, we accept it (prompt is the only gate) |
+| Agent calls `create_pr` before tests pass | create_pr checks state.tests_passed
+→ returns an error and does not push/open a PR |
 | Tool execution error | Return error string; agent adapts |
 | MAX_TURNS reached | Loop exits; print last assistant message; exit(1) |
 | `run_command` timeout (>60s) | Subprocess killed; return `"error: command timed out"` |
@@ -181,7 +189,25 @@ class AgentState:
 
 ## Validation Gate
 
-**Pre-PR**: System prompt requires `run_command("pytest")` (or equivalent) exit code 0 before `create_pr`. This is enforced by instruction, not by code. There is no programmatic interception — keeping it simple is the right call for 45 minutes.
+PR creation is enforced deterministically in the tool layer.
+
+`run_tests()` sets `state.tests_passed = True` only when the
+test command exits with return code 0.
+
+Any successful `write_file()` resets:
+
+`state.tests_passed = False`
+
+`create_pr()` checks `state.tests_passed` before pushing or opening
+a PR.
+
+If tests have not passed, it returns:
+
+`"error: PR blocked because tests have not passed"`
+
+The system prompt also instructs the agent to run tests before
+creating a PR, but correctness does not depend on the LLM
+following that instruction.
 
 ---
 
