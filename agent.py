@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -9,7 +10,7 @@ import anthropic
 from tools import AgentState, TOOL_SCHEMAS, dispatch
 
 MAX_TURNS = 20
-MODEL = "claude-opus-4-5"
+MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-opus-5")
 
 
 @dataclass
@@ -84,16 +85,20 @@ def run_agent(job: IssueJob) -> tuple[bool, str]:
     ]
 
     last_text = ""
+    pr_url = ""
 
     # ── Agent loop ───────────────────────────────────────────────────────────
     for _ in range(MAX_TURNS):
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=4096,
-            system=_build_system_prompt(job.repo_path, branch),
-            tools=TOOL_SCHEMAS,
-            messages=messages,
-        )
+        try:
+            response = client.messages.create(
+                model=MODEL,
+                max_tokens=4096,
+                system=_build_system_prompt(job.repo_path, branch),
+                tools=TOOL_SCHEMAS,
+                messages=messages,
+            )
+        except Exception as exc:
+            return False, f"error: Anthropic API call failed: {exc}"
 
         # Append the full assistant turn (may contain text + tool_use blocks).
         messages.append({"role": "assistant", "content": response.content})
@@ -111,6 +116,8 @@ def run_agent(job: IssueJob) -> tuple[bool, str]:
             for block in response.content:
                 if block.type == "tool_use":
                     result_str = dispatch(block.name, block.input, state)
+                    if block.name == "create_pr" and state.pr_opened:
+                        pr_url = result_str
                     tool_results.append(
                         {
                             "type": "tool_result",
@@ -125,5 +132,5 @@ def run_agent(job: IssueJob) -> tuple[bool, str]:
 
     # ── Evaluate outcome ─────────────────────────────────────────────────────
     if state.pr_opened:
-        return True, last_text
+        return True, pr_url or last_text
     return False, last_text
