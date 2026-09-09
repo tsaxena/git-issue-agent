@@ -13,28 +13,45 @@ Language: Python. No framework. One dependency: `anthropic`. Git and GitHub ops 
 ## Trigger / Ingress Layer
 
 The core agent is independent of how an issue enters the system.
+All triggers normalize their input into a shared `IssueJob` and call `run_agent(job)`.
 
-Two thin adapters can construct the same IssueJob:
+```python
+@dataclass
+class IssueJob:
+    repo_path: str   # absolute local path to the cloned repository
+    issue_title: str
+    issue_body: str
+    issue_number: int | None = None  # set when originating from GitHub
+```
 
-1. CLI — primary implementation and test harness.
-   Accepts repo path and issue text/issue file.
+### Adapter contract
 
-2. GitHub webhook — production integration.
-   A FastAPI endpoint receives GitHub `issues` events,
-   verifies the webhook signature, extracts the repository,
-   issue number/title/body, and constructs an IssueJob.
+A trigger adapter must only:
+1. Authenticate / validate the incoming event or input.
+2. Extract repository and issue information.
+3. Construct an `IssueJob`.
+4. Call `run_agent(job)` and return the result.
 
-Both adapters call the same agent engine.
+No reasoning, investigation, or agent logic belongs in an adapter.
 
-For the 45-minute implementation, the CLI is implemented first.
-The webhook is an extension if time permits, since it should contain
-no agent logic.
+### CLI adapter (implemented in scope)
+
+`main.py` is the CLI adapter.
+Accepts `--repo <path>` and `--issue <text>` or `--issue-file <path>`.
+Constructs `IssueJob(repo_path=..., issue_title="(cli)", issue_body=...)` and calls `run_agent`.
+
+### GitHub webhook adapter (future extension)
+
+A FastAPI endpoint receives GitHub `issues` events, verifies the HMAC-SHA256 signature, extracts `repository.full_name` / `issue.number` / `issue.title` / `issue.body`, and constructs an `IssueJob`.
+No agent logic is added; the endpoint calls the same `run_agent(job)`.
+Not implemented in the 45-minute scope.
 
 ## Main Components
 
 | Component | File | Responsibility |
 |-----------|------|----------------|
-| Entry point | `main.py` | CLI args, call `run_agent()`, print result, exit |
+| Entry point / CLI adapter | `main.py` | Parse CLI args, construct `IssueJob`, call `run_agent()`, print result, exit |
+| Shared job type | `agent.py` | `IssueJob` dataclass (imported by any adapter) |
 | Agent loop | `agent.py` | Control loop, Claude API calls, tool dispatch, system prompt |
 | Tools | `tools.py` | Tool implementations + `TOOL_SCHEMAS` list |
 
@@ -43,10 +60,10 @@ no agent logic.
 ## Agent Control Loop
 
 ```
-run_agent(issue: str, repo_path: str):
+run_agent(job: IssueJob):
   branch = f"agent/{timestamp}"
-  run: git checkout -b {branch}
-  messages = [user_message(issue)]
+  run: git checkout -b {branch}  # in job.repo_path
+  messages = [user_message(f"{job.issue_title}\n\n{job.issue_body}")]
 
   while api_calls < MAX_TURNS:
     response = claude.messages.create(system=SYSTEM_PROMPT, messages=messages, tools=TOOL_SCHEMAS)
@@ -197,9 +214,9 @@ Build and verify in this order — each step is independently testable:
    - Wire dispatch: `if name == "run_command": ...` for each of the 6 tools
    - Test with a trivial issue: "add a comment to main.py" against a scratch repo
 
-3. **`main.py`** — thin CLI wrapper last:
+3. **`main.py`** — CLI adapter last:
    - `--repo` (path), `--issue` (string) or `--issue-file` (path to text file)
-   - Call `run_agent()`, exit with its return code
+   - Construct `IssueJob`, call `run_agent(job)`, exit with its return code
 
 4. **Refine system prompt** — run against `doc-summarizer` with a real issue; iterate on prompt wording until behavior is correct.
 
