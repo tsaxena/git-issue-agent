@@ -10,6 +10,26 @@ Language: Python. No framework. One dependency: `anthropic`. Git and GitHub ops 
 
 ---
 
+## Trigger / Ingress Layer
+
+The core agent is independent of how an issue enters the system.
+
+Two thin adapters can construct the same IssueJob:
+
+1. CLI — primary implementation and test harness.
+   Accepts repo path and issue text/issue file.
+
+2. GitHub webhook — production integration.
+   A FastAPI endpoint receives GitHub `issues` events,
+   verifies the webhook signature, extracts the repository,
+   issue number/title/body, and constructs an IssueJob.
+
+Both adapters call the same agent engine.
+
+For the 45-minute implementation, the CLI is implemented first.
+The webhook is an extension if time permits, since it should contain
+no agent logic.
+
 ## Main Components
 
 | Component | File | Responsibility |
