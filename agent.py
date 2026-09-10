@@ -42,36 +42,44 @@ def _detect_test_cmd(repo_path: str) -> str:
 def _make_prompt(job: IssueJob, branch: str, test_output: str | None) -> str:
     header = (
         f"You are a software engineer resolving a GitHub issue.\n"
-        f"Repository: current working directory  |  Branch: {branch}\n\n"
-        f"Issue: {job.issue_title}\n\n"
-        f"{job.issue_body}\n\n"
+        f"Repository root: current working directory  |  Branch: {branch}\n\n"
+        f"Issue title: {job.issue_title}\n\n"
+        f"Issue body:\n{job.issue_body}\n\n"
     )
 
     if test_output is None:
         task = (
             "Task:\n"
-            "1. Investigate the codebase to locate the relevant code.\n"
-            "2. Identify the root cause (bug) or the right location (feature).\n"
-            "3. Implement the fix or feature by editing the appropriate source files.\n"
-            "When done, briefly describe what you changed and why.\n\n"
+            "1. Orient: list the repository files (or read the README) to understand the project layout.\n"
+            "2. Read the relevant source files and any corresponding test files to understand "
+            "the expected behavior before making changes.\n"
+            "3. Identify the root cause (for bugs) or the correct insertion point (for features).\n"
+            "4. Edit only the source file(s) needed to implement the minimal fix or feature.\n"
+            "   - Make the smallest change that resolves the issue.\n"
+            "   - Do not rewrite, reformat, or touch code unrelated to the issue.\n\n"
+            "When finished, print a short pull-request description "
+            "(2–5 markdown bullet points) summarizing what you changed and why. "
+            "This text will be used verbatim as the PR body.\n\n"
         )
     else:
         task = (
-            "Your previous implementation was applied, but the test suite failed:\n\n"
+            "Your previous implementation was applied and the test suite was run. "
+            "The tests FAILED with the following output:\n\n"
             f"{test_output}\n\n"
             "Task:\n"
-            "1. Read the test failures above carefully.\n"
-            "2. Re-read the relevant source files to understand what went wrong.\n"
-            "3. Fix the implementation so all tests pass.\n"
-            "When done, briefly describe what you changed.\n\n"
+            "1. Read the test output above carefully to identify which assertions failed and why.\n"
+            "2. Re-read the relevant source file(s) to understand exactly what is wrong.\n"
+            "3. Fix only what the test failures indicate is broken; do not touch unrelated code.\n\n"
+            "When finished, print a short description (2–5 markdown bullet points) "
+            "of what you corrected. This text will be used verbatim as the PR body.\n\n"
         )
 
     rules = (
         "Rules — follow exactly:\n"
-        "- Do NOT run the test suite (tests are run separately after you finish).\n"
-        "- Do NOT run any git commands (add, commit, push, checkout).\n"
-        "- Do NOT create a pull request.\n"
-        "- Only read and edit source files to implement the change.\n"
+        "- Do NOT run the test suite (tests are run automatically after you finish).\n"
+        "- Do NOT run any git commands (git add, commit, push, checkout, etc.).\n"
+        "- Do NOT create or push a pull request.\n"
+        "- Edit source files only; do not modify test files or CI configuration.\n"
     )
 
     return header + task + rules

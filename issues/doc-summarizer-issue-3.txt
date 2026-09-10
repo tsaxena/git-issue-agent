@@ -1,0 +1,5 @@
+Add timeout to Azure OpenAI HTTP clients
+
+- Neither the LLM client (llm_client.py:41-44) nor the embedding client (embedding_client.py:17-20) sets a timeout on the OpenAI() constructor
+- A hung or slow connection blocks a FastAPI worker indefinitely, which can exhaust the worker pool
+- Add a configurable timeout to both client constructors
