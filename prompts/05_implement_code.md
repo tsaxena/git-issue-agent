@@ -44,15 +44,16 @@ Deterministic Python code should continue to own the lifecycle and invariants de
 Keep Claude Code's capabilities limited to those explicitly allowed by `DESIGN.md`.
 
 ## Implementation rules
+- Do not redesign the architecture.
+- Do not change previously completed modules unless a concrete integration bug requires it.
+- Do not add frameworks, services, agents, persistence, queues, or infrastructure not present in DESIGN.md.
+- Keep the implementation minimal enough for the interview time box.
+- Follow the contracts, invariants, trust boundaries, and failure behavior in DESIGN.md.
+- If the current implementation step includes an external input or integration explicitly required by DESIGN.md, implement the smallest real adapter for it rather than substituting manually supplied data.
+- Prefer the smallest code change that completes this implementation step.
+- Reuse the existing local Claude Code authentication; do not require a separate Anthropic API key.
+- If a design issue truly blocks implementation, stop and explain the blocker rather than silently redesigning around it.
 
-* Do not redesign the architecture.
-* Do not change previously completed modules unless a concrete integration bug requires it.
-* Do not add frameworks, services, agents, persistence, queues, or infrastructure not present in `DESIGN.md`.
-* Keep the implementation minimal enough for the interview time box.
-* Follow the contracts, invariants, trust boundaries, and failure behavior in `DESIGN.md`.
-* Prefer the smallest code change that completes this implementation step.
-* Reuse the existing local Claude Code authentication; do not require a separate Anthropic API key.
-* If a design issue truly blocks implementation, stop and explain the blocker rather than silently redesigning around it.
 
 After implementation:
 
@@ -66,3 +67,4 @@ After implementation:
 8. Stop.
 
 Do not continue to the next implementation step automatically.
+
