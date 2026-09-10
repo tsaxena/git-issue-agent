@@ -62,7 +62,6 @@ def write_file(path: str, content: str, state: AgentState) -> str:
 
 
 def run_command(cmd: str, state: AgentState) -> str:
-    state.tests_passed = False
     return _fmt(*_run(cmd, cwd=state.repo_path))
 
 

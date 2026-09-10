@@ -29,7 +29,9 @@ def main() -> None:
             print(f"error: cannot read issue file: {e}", file=sys.stderr)
             sys.exit(2)
 
-    job = IssueJob(repo_path=repo_path, issue_title="(cli)", issue_body=issue_text)
+    lines = issue_text.splitlines()
+    issue_title = lines[0][:72] if lines else "(no title)"
+    job = IssueJob(repo_path=repo_path, issue_title=issue_title, issue_body=issue_text)
 
     success, message = run_agent(job)
     print(message)

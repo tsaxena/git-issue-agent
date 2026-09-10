@@ -52,7 +52,10 @@ CLI (--repo, --issue)
     GitHub PR URL (success) | error message (failure)
 ```
 
-**Primary trigger (interview):** CLI — `python main.py --repo <path> --issue <text>`
+**Primary trigger (interview):** CLI — `python main.py --repo <path> --issue <text>` or `--issue-file <path>`
+
+- `--issue <text>`: full string becomes `issue_body`; `issue_title` is the first line, truncated to 72 characters.
+- `--issue-file <path>`: reads the file; same title/body extraction rule.
 
 **Future extension (out of scope):** GitHub webhook `issues.opened` → same `IssueJob` → same `run_agent()`.
 
@@ -290,7 +293,7 @@ Repeat until end_turn (PR opened or gives up) or MAX_TURNS hit
 | Command execution is time-bounded | `subprocess.run(..., timeout=60)` in `_run()` helper |
 | Irreversible ops gated | `create_pr()` is the only function that pushes or calls `gh` |
 
-These are structural guarantees — they hold regardless of what the LLM decides to call.
+The first two rows are structural only when code changes go through `write_file`. `run_command` can modify files via shell operators (`sed -i`, redirects, `tee`) without triggering the `tests_passed = False` reset — a known prototype limitation. The system prompt **must** explicitly prohibit using `run_command` for code modifications; this is enforced by prompt, not by code. All other rows in the table are structural regardless of LLM behavior.
 
 ---
 
@@ -324,6 +327,7 @@ These are structural guarantees — they hold regardless of what the LLM decides
 | MAX_TURNS reached | Loop exits; return `(False, last_assistant_text)` |
 | `end_turn` with no PR opened | Return `(False, last_assistant_text)` — agent gave up cleanly |
 | `git push` fails in `create_pr` | `create_pr` returns the push error; LLM sees it in next turn |
+| `git push` succeeds but `gh pr create` fails | Branch is on GitHub but `state.pr_opened` stays `False`; `create_pr` returns the gh error; on retry the push is a no-op and `gh pr create` is attempted again — agent can recover without manual intervention |
 | Branch already exists | `git checkout -b` fails; `run_agent` returns early with error before spending any LLM budget |
 
 All failures are visible in tool results; the LLM can observe and adapt. No silent failures.
