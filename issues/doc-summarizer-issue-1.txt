@@ -1,0 +1,3 @@
+ExperimentRunner should validate file existence before parsing
+
+ExperimentRunner.run() in runner.py passes file_path straight to PyMuPDFParser.parse() without checking if the file exists. When the path is wrong, the user gets a cryptic PyMuPDF error instead of a clear "file not found" message. Add an existence check with a descriptive error before calling the parser.
