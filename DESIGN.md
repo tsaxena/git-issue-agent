@@ -358,13 +358,75 @@ run\_agent(job):
 
 Claude Code is invoked with \`--allowedTools Read,Grep,Glob,Edit,Write\`. These are Claude Code's own built-in capabilities:
 
-\- **\*\*Read\*\*** — read files in the repository
+**\*\*Read\*\***
 
-\- **\*\*Edit\*\*** — apply targeted edits to source files
+\- Purpose: Read files in the repository to understand code structure and existing behavior.
 
-\- **\*\*Write\*\*** — create or overwrite files
+\- Input: File path within the repo.
 
-\- **\*\*Grep / Glob\*\*** — search file contents and repository paths without shell access
+\- Output: File contents.
+
+\- Side effects: None.
+
+\- Failure behavior: Returns an error if the file does not exist; Claude Code explores alternate paths.
+
+\- Why the LLM needs this tool: Root-cause analysis requires reading source files, tests, and configuration.
+
+**\*\*Edit\*\***
+
+\- Purpose: Apply targeted edits to source files to implement the fix or feature.
+
+\- Input: File path and replacement content (old string → new string).
+
+\- Output: Confirmation of edit applied.
+
+\- Side effects: Modifies files in the working tree; changes persist until committed or reverted.
+
+\- Failure behavior: Returns an error if the target string is not found or the file does not exist.
+
+\- Why the LLM needs this tool: Code changes must be written to disk for the Python harness to test and commit.
+
+**\*\*Write\*\***
+
+\- Purpose: Create or overwrite files (for cases where a fix requires a new file).
+
+\- Input: File path and full file content.
+
+\- Output: Confirmation of write.
+
+\- Side effects: Creates or overwrites files in the working tree.
+
+\- Failure behavior: Returns an error on permission or path errors.
+
+\- Why the LLM needs this tool: Some fixes require creating new files (e.g., a new module or test fixture).
+
+**\*\*Grep\*\***
+
+\- Purpose: Search file contents by pattern across the repository without shell access.
+
+\- Input: Regex pattern and optional path filter.
+
+\- Output: Matching lines with file paths and line numbers.
+
+\- Side effects: None.
+
+\- Failure behavior: Returns empty results if no matches; does not raise errors.
+
+\- Why the LLM needs this tool: Locating all usages of a symbol or pattern is essential for impact analysis before editing.
+
+**\*\*Glob\*\***
+
+\- Purpose: Search repository paths by file pattern to discover layout and locate modules.
+
+\- Input: Glob pattern and optional root path.
+
+\- Output: List of matching file paths.
+
+\- Side effects: None.
+
+\- Failure behavior: Returns empty results if no matches.
+
+\- Why the LLM needs this tool: Navigating an unfamiliar codebase requires discovering file layout without shell access.
 
 Claude Code is not given shell or GitHub capabilities. Test execution, commits, pushes, and PR creation remain outside the model and are performed only by Python.
 
@@ -536,7 +598,49 @@ The LLM is not involved in selecting the validation command, so it cannot choose
 
 \---
 
-**## 15. Observability**
+**## 15. Evaluation**
+
+**Test cases**
+
+\| Case \| Input \| Expected outcome \|
+
+\|---\|---\|---\|
+
+\| Happy path \| Clear bug; tests pass on first Claude Code attempt \| PR created; \`tests\_passed\` True; exit 0 \|
+
+\| Repair path \| Bug that requires test feedback; first attempt fails tests; second passes \| PR created on attempt 2; full test output fed into repair prompt \|
+
+\| Max attempts exhausted \| Bug too complex or tests structurally broken \| Returns \`(False, "error: tests still failing after 3 attempts\\n\<output>")\` \|
+
+\| \`claude -p\` timeout \| Claude Code hangs past \`CLAUDE\_TIMEOUT\` \| \`\_invoke\_claude\` returns \`(-1, "error: claude -p timed out")\`; run fails cleanly \|
+
+\| No test suite detected \| Repo with no recognized config file \| Falls back to \`pytest\`; succeeds or fails on returncode \|
+
+\| Prompt injection \| Issue body contains adversarial text \| Text enters Claude's context only; no shell access means no direct filesystem side effect beyond the allowed tools \|
+
+**Deterministic checks**
+
+\- \`create\_pr()\` is never called when \`state.tests\_passed\` is False.
+
+\- Branch name matches \`agent/YYYYMMDD-HHMMSS\` format.
+
+\- \`git commit\` is never called before at least one test run completes.
+
+\- Attempt count does not exceed \`MAX\_ATTEMPTS\`.
+
+**Agent / quality checks**
+
+\- PR description references the issue and is coherent.
+
+\- Only files plausibly related to the issue are modified.
+
+\- No test files are deleted or disabled to manufacture a passing run.
+
+\- Repair prompt on attempt 2+ contains the full test failure output from the previous attempt.
+
+\---
+
+**## 16. Observability**
 
 Progress is printed to stdout:
 
@@ -560,7 +664,7 @@ No structured logging or trace backend. In the current prototype, the Claude sub
 
 \---
 
-**## 16. Smallest End-to-End Vertical Slice**
+**## 17. Smallest End-to-End Vertical Slice**
 
 \`\`\`
 
@@ -610,7 +714,29 @@ main.py prints PR URL, exits 0
 
 \---
 
-**## 17. Key Tradeoffs**
+**## 18. Implementation Order**
+
+Build in dependency order and verify at each stage.
+
+1\. **Core schemas** — \`IssueJob\` and \`AgentState\` dataclasses; import and instantiate with sample values.
+
+2\. **Deterministic helpers** — \`\_run\`, \`\_fmt\`, \`git\_commit\`, \`create\_pr\`, \`\_detect\_test\_cmd\`; run against a temporary git repo without any LLM call.
+
+3\. **Claude Code invocation** — \`\_invoke\_claude\`; call with a trivial prompt and verify stdout is captured and returncode is returned correctly.
+
+4\. **Prompt builder** — \`\_make\_prompt\` for initial and repair variants; inspect output manually.
+
+5\. **\`run\_agent()\` orchestrator** — wire the loop; stub \`\_invoke\_claude\` to return a canned PR description and verify branch / test / commit / PR sequence fires in order.
+
+6\. **CLI adapter** — \`main.py\`; verify \`--repo\` and \`--issue\` / \`--issue-file\` args parse correctly and route to \`run\_agent()\`.
+
+7\. **End-to-end smoke test** — run against a local repo with a seeded one-line bug; confirm a PR is opened.
+
+8\. **Repair path** — seed a bug that requires test feedback to fix; confirm attempt 2 receives the failure output and succeeds.
+
+\---
+
+**## 19. Key Tradeoffs / Interview Questions**
 
 **\*\*Why \`claude -p\` instead of the Anthropic SDK with custom tools?\*\***
 
@@ -638,9 +764,17 @@ The prototype still operates directly on a local checkout and relies on reposito
 
 \- No per-run cost tracking or token budget enforcement.
 
+**\*\*What would you cut if implementation time were halved?\*\***
+
+The repair loop. A single Claude Code pass with no retry still exercises the core thesis (LLM edits → deterministic test gate → PR). Retry is a reliability improvement, not an architectural necessity.
+
+**\*\*What would you build next with another day?\*\***
+
+Sandbox isolation: run each job inside a container with a writable clone and read-only access outside that workspace. This eliminates the workspace-isolation risk without changing \`agent.py\` or \`tools.py\`.
+
 \---
 
-**## 18. Deliberately Out of Scope**
+**## 20. Deliberately Out of Scope**
 
 \| Not building | Rationale |
 
@@ -662,7 +796,7 @@ The prototype still operates directly on a local checkout and relies on reposito
 
 \---
 
-**## 19. Production Evolution**
+**## 21. Production Evolution**
 
 The architecture extends without redesigning the core:
 
